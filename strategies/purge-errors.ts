@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@mariozechner/pi-coding-agent";
-import type { DCPConfig, DCPSessionState } from "../types";
-import { estimateTokens } from "../utils";
+import type { AgentMessage } from '@mariozechner/pi-agent-core'
+import type { DCPConfig, DCPSessionState } from '../types'
+import { estimateTokens } from '../utils'
 
 export function applyPurgeErrors(
   messages: AgentMessage[],
@@ -8,55 +8,59 @@ export function applyPurgeErrors(
   state: DCPSessionState,
   turnAges: number[]
 ): void {
-  if (!config.strategies.purgeErrors.enabled) return;
+  if (!config.strategies.purgeErrors.enabled) return
 
-  const minTurnAge = config.strategies.purgeErrors.minTurnAge;
+  const minTurnAge = config.strategies.purgeErrors.minTurnAge
 
   for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
-    const turnAge = turnAges[i];
+    const msg = messages[i]
+    const turnAge = turnAges[i]
 
-    if (msg.role === "toolResult" && msg.isError) {
-      if (turnAge < minTurnAge) continue;
+    if (msg.role === 'toolResult' && msg.isError) {
+      if (turnAge < minTurnAge) continue
       if (config.protectedTools.includes(msg.toolName)) {
-        state.stats.protectedSkipCount++;
-        continue;
+        state.stats.protectedSkipCount++
+        continue
       }
 
       // Check if it's already a DCP placeholder
-      if (msg.content.length === 1 && msg.content[0].type === "text" && msg.content[0].text.startsWith("[DCP:")) {
-        continue;
+      if (
+        msg.content.length === 1 &&
+        msg.content[0].type === 'text' &&
+        msg.content[0].text.startsWith('[DCP:')
+      ) {
+        continue
       }
 
-      const tokensSaved = estimateTokens(msg.content);
-      state.stats.tokensSavedEstimate += tokensSaved;
-      state.stats.prunedItemsCount.purgeErrors++;
+      const tokensSaved = estimateTokens(msg.content)
+      state.stats.tokensSavedEstimate += tokensSaved
+      state.stats.prunedItemsCount.purgeErrors++
 
       // We preserve the first line or up to 200 chars to keep the error identity
-      let summary = "";
+      let summary = ''
       for (const block of msg.content) {
-        if (block.type === "text") {
-          summary += block.text;
-          if (summary.length > 200) break;
+        if (block.type === 'text') {
+          summary += block.text
+          if (summary.length > 200) break
         }
       }
 
-      const firstLine = summary.split("\n")[0].slice(0, 150);
+      const firstLine = summary.split('\n')[0].slice(0, 150)
 
       state.details.push({
-        strategy: "purgeErrors",
+        strategy: 'purgeErrors',
         toolName: msg.toolName,
         turnAge,
         tokensSaved,
-        argsSummary: firstLine
-      });
+        argsSummary: firstLine,
+      })
 
       msg.content = [
         {
-          type: "text",
-          text: `[DCP: Stale error payload minimized.]\n${firstLine}...`
-        }
-      ];
+          type: 'text',
+          text: `[DCP: Stale error payload minimized.]\n${firstLine}...`,
+        },
+      ]
     }
   }
 }

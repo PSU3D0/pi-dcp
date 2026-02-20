@@ -1,0 +1,32 @@
+{
+  "name": "pi-dcp",
+  "version": "1.0.0",
+  "description": "Dynamic Context Pruning (DCP) extension for the Pi Coding Agent",
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "format": "prettier --write \"**/*.ts\"",
+    "lint": "eslint . --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "pi",
+    "coding-agent",
+    "llm",
+    "context-window",
+    "pruning"
+  ],
+  "author": "",
+  "license": "MIT",
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.54.0"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-agent-core": "^0.54.0",
+    "@types/node": "^25.3.0",
+    "bun-types": "^1.3.9",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3"
+  }
+}
