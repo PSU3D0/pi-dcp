@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, AgentMessage } from "@mariozechner/pi-coding-agent";
 import { loadConfig } from "./config";
 import { createSessionState } from "./state";
 import { handleContextTransform } from "./hooks/context-transform";
@@ -11,10 +11,24 @@ export default function (pi: ExtensionAPI) {
   const config = loadConfig(cwd);
   const state = createSessionState();
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     // Optionally update cwd logic if `ctx.cwd` differs from process.cwd()
     const sessionConfig = loadConfig(ctx.cwd);
     Object.assign(config, sessionConfig);
+
+    // Perform a dry-run of the transform to populate stats and TUI footer immediately
+    const branch = ctx.sessionManager.getBranch();
+    const messages: AgentMessage[] = [];
+    for (const entry of branch) {
+      if (entry.type === "message") {
+        // Deep copy just like the context hook does
+        messages.push(JSON.parse(JSON.stringify(entry.message)));
+      }
+    }
+
+    if (messages.length > 0) {
+      handleContextTransform(messages, config, state, ctx);
+    }
     
     if (config.debug) {
       ctx.ui.notify("DCP Extension Loaded", "info");
