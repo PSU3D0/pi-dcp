@@ -36,8 +36,13 @@ export function handleContextTransform(
     applyOutputBodyReplace(messages, config, state, toolArgsIndex, turnAges);
   }
 
-  if (config.debug) {
-    ctx.ui.setStatus("dcp", `DCP: Saved ~${state.stats.tokensSavedEstimate} tokens`);
+  if (state.stats.tokensSavedEstimate > 0) {
+    ctx.ui.setStatus("dcp", `✂️ DCP: ~${state.stats.tokensSavedEstimate} tokens saved`);
+  } else if (config.debug) {
+    ctx.ui.setStatus("dcp", `DCP: 0 tokens saved`);
+  } else {
+    // Clear status if no tokens saved and not debugging
+    ctx.ui.setStatus("dcp", undefined);
   }
 
   return { messages };

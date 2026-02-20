@@ -27,6 +27,37 @@ export function handleDcpCommand(
       ctx.ui.notify(message, "info");
       break;
 
+    case "detail":
+    case "details":
+      if (!config.enabled) {
+        ctx.ui.notify("DCP is currently disabled.", "warning");
+        return;
+      }
+      if (state.details.length === 0) {
+        ctx.ui.notify("No items have been pruned yet.", "info");
+        return;
+      }
+
+      let detailMd = `# DCP Pruned Items (~${state.stats.tokensSavedEstimate} tokens saved)\n\n`;
+
+      const grouped = state.details.reduce((acc, item) => {
+        if (!acc[item.strategy]) acc[item.strategy] = [];
+        acc[item.strategy].push(item);
+        return acc;
+      }, {} as Record<string, typeof state.details>);
+
+      for (const [strategy, items] of Object.entries(grouped)) {
+        detailMd += `## ${strategy} (${items.length})\n`;
+        for (const item of items) {
+          const turnStr = item.turnAge >= 0 ? `Turn ${item.turnAge}` : "Assistant Action";
+          detailMd += `- **${item.toolName}** [${turnStr}] (~${item.tokensSaved} tokens): \`${item.argsSummary}\`\n`;
+        }
+        detailMd += "\n";
+      }
+
+      ctx.ui.editor("DCP Details", detailMd);
+      break;
+
     case "manual":
       const action = parts[1]?.toLowerCase();
       if (action === "on") {

@@ -44,6 +44,14 @@ export function applyDeduplicate(
         state.stats.tokensSavedEstimate += tokensSaved;
         state.stats.prunedItemsCount.deduplicate++;
 
+        state.details.push({
+          strategy: "deduplicate",
+          toolName: msg.toolName,
+          turnAge,
+          tokensSaved,
+          argsSummary: JSON.stringify(args).slice(0, 100)
+        });
+
         msg.content = [
           {
             type: "text",

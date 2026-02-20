@@ -52,6 +52,14 @@ export function applySupersedeWrites(
             if (saved > 0) {
               state.stats.tokensSavedEstimate += saved;
               state.stats.prunedItemsCount.supersedeWrites++;
+
+              state.details.push({
+                strategy: "supersedeWrites",
+                toolName: block.name,
+                turnAge: -1, // We don't track turn age perfectly for assistant blocks here, just rough estimate
+                tokensSaved: saved,
+                argsSummary: `Path: ${path}`
+              });
             }
           }
         }

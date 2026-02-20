@@ -28,10 +28,19 @@ export interface DCPConfig {
   };
 }
 
+export interface PrunedItemDetail {
+  strategy: string;
+  toolName: string;
+  turnAge: number;
+  tokensSaved: number;
+  argsSummary: string;
+}
+
 export interface DCPSessionState {
   stats: {
     tokensSavedEstimate: number;
     prunedItemsCount: Record<string, number>;
     protectedSkipCount: number;
   };
+  details: PrunedItemDetail[];
 }

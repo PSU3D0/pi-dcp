@@ -48,6 +48,14 @@ export function applyOutputBodyReplace(
         const args = toolArgsIndex.get(msg.toolCallId);
         const argsSummary = args ? JSON.stringify(args).slice(0, 100) : "unknown args";
 
+        state.details.push({
+          strategy: "outputReplace",
+          toolName: msg.toolName,
+          turnAge,
+          tokensSaved,
+          argsSummary
+        });
+
         msg.content = [
           {
             type: "text",

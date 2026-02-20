@@ -43,6 +43,14 @@ export function applyPurgeErrors(
 
       const firstLine = summary.split("\n")[0].slice(0, 150);
 
+      state.details.push({
+        strategy: "purgeErrors",
+        toolName: msg.toolName,
+        turnAge,
+        tokensSaved,
+        argsSummary: firstLine
+      });
+
       msg.content = [
         {
           type: "text",

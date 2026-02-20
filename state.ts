@@ -11,7 +11,8 @@ export function createSessionState(): DCPSessionState {
         supersedeWrites: 0
       },
       protectedSkipCount: 0
-    }
+    },
+    details: []
   };
 }
 
@@ -22,4 +23,5 @@ export function resetSessionState(state: DCPSessionState): void {
   state.stats.prunedItemsCount.outputBodyReplace = 0;
   state.stats.prunedItemsCount.supersedeWrites = 0;
   state.stats.protectedSkipCount = 0;
+  state.details = [];
 }
