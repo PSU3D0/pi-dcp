@@ -1,4 +1,5 @@
-import type { ExtensionAPI, AgentMessage } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { buildSessionContext } from "@mariozechner/pi-coding-agent";
 import { loadConfig } from "./config";
 import { createSessionState } from "./state";
 import { handleContextTransform } from "./hooks/context-transform";
@@ -17,16 +18,13 @@ export default function (pi: ExtensionAPI) {
     Object.assign(config, sessionConfig);
 
     // Perform a dry-run of the transform to populate stats and TUI footer immediately
-    const branch = ctx.sessionManager.getBranch();
-    const messages: AgentMessage[] = [];
-    for (const entry of branch) {
-      if (entry.type === "message") {
-        // Deep copy just like the context hook does
-        messages.push(JSON.parse(JSON.stringify(entry.message)));
-      }
-    }
+    const entries = ctx.sessionManager.getEntries();
+    const leafId = ctx.sessionManager.getLeafId();
+    const context = buildSessionContext(entries, leafId);
 
-    if (messages.length > 0) {
+    if (context.messages.length > 0) {
+      // Deep copy just like the context hook does to avoid mutating the real branch state
+      const messages = JSON.parse(JSON.stringify(context.messages));
       handleContextTransform(messages, config, state, ctx);
     }
     
