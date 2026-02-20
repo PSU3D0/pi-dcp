@@ -18,7 +18,7 @@ DCP solves this by functioning as a "Zero-Mutation Context Hook". It sits betwee
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/pi-dcp.git
+git clone https://github.com/PSU3D0/pi-dcp.git
 
 # Run Pi with the extension
 pi -e path/to/pi-dcp/index.ts
