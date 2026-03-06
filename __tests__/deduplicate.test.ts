@@ -1,5 +1,11 @@
 import { test, expect } from 'bun:test'
-import { computeTurnAges, buildToolCallIndex, estimateTokens } from '../utils'
+import {
+  computeTurnAges,
+  buildToolCallIndex,
+  getToolSignature,
+  getToolSignatureCacheEntryCountForTests,
+} from '../utils'
+import { createProtectionPolicy } from '../protection'
 import { applyDeduplicate } from '../strategies/deduplicate'
 import type { AgentMessage } from '@mariozechner/pi-agent-core'
 import type { DCPConfig } from '../types'
@@ -11,6 +17,7 @@ function mockConfig(): DCPConfig {
     mode: 'safe',
     debug: false,
     turnProtection: { enabled: true, turns: 2 }, // Only protect the last 2 turns
+    stepProtection: { enabled: true, steps: 2 },
     thresholds: { nudge: 0.7, autoPrune: 0.8, forceCompact: 0.9 },
     protectedTools: ['todo'],
     protectedFilePatterns: [],
@@ -57,6 +64,77 @@ test('computeTurnAges assigns 0 to the last user turn and increments backwards',
 
   const ages = computeTurnAges(messages)
   expect(ages).toEqual([2, 2, 1, 1, 0])
+})
+
+test('buildToolCallIndex and signature hashing do not leak stale args across reused toolCallIds', () => {
+  const firstMessages: AgentMessage[] = [
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'shared_call',
+          name: 'read',
+          arguments: { path: 'a.txt' },
+        },
+      ],
+      api: 't',
+      provider: 't',
+      model: 't',
+      usage: {} as any,
+      stopReason: 'stop',
+      timestamp: 1,
+    },
+  ]
+  const secondMessages: AgentMessage[] = [
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'shared_call',
+          name: 'read',
+          arguments: { path: 'b.txt' },
+        },
+      ],
+      api: 't',
+      provider: 't',
+      model: 't',
+      usage: {} as any,
+      stopReason: 'stop',
+      timestamp: 2,
+    },
+  ]
+
+  const firstIndex = buildToolCallIndex(firstMessages)
+  const secondIndex = buildToolCallIndex(secondMessages)
+
+  const firstSig = getToolSignature(
+    'read',
+    firstIndex.get('shared_call'),
+    'shared_call'
+  )
+  const secondSig = getToolSignature(
+    'read',
+    secondIndex.get('shared_call'),
+    'shared_call'
+  )
+
+  expect(firstSig).not.toBe(secondSig)
+})
+
+test('getToolSignature does not retain raw payloads in a process-global cache', () => {
+  const entriesBefore = getToolSignatureCacheEntryCountForTests()
+  const largeArgs = {
+    path: 'a.txt',
+    content: 'x'.repeat(20_000),
+  }
+
+  const firstSig = getToolSignature('write', largeArgs, 'call_1')
+  const secondSig = getToolSignature('write', largeArgs, 'call_2')
+
+  expect(firstSig).toBe(secondSig)
+  expect(getToolSignatureCacheEntryCountForTests()).toBe(entriesBefore)
 })
 
 test('applyDeduplicate prunes older duplicate non-protected tools', () => {
@@ -123,9 +201,9 @@ test('applyDeduplicate prunes older duplicate non-protected tools', () => {
   const config = mockConfig()
   const state = createSessionState()
   const index = buildToolCallIndex(messages)
-  const ages = computeTurnAges(messages)
+  const policy = createProtectionPolicy(messages, config)
 
-  applyDeduplicate(messages, config, state, index, ages)
+  applyDeduplicate(messages, config, state, index, policy)
 
   // call_2 is recent, so it should be kept
   expect((messages[7] as any).content).toEqual([
@@ -205,9 +283,9 @@ test('applyDeduplicate does NOT prune protected tools', () => {
   const config = mockConfig()
   const state = createSessionState()
   const index = buildToolCallIndex(messages)
-  const ages = computeTurnAges(messages)
+  const policy = createProtectionPolicy(messages, config)
 
-  applyDeduplicate(messages, config, state, index, ages)
+  applyDeduplicate(messages, config, state, index, policy)
 
   // Both should be kept because 'todo' is protected
   expect((messages[2] as any).content).toEqual([

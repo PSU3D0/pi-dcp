@@ -1,13 +1,22 @@
-import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { DCPConfig } from './types'
+
+type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends Array<infer U>
+    ? U[]
+    : T[K] extends object
+      ? DeepPartial<T[K]>
+      : T[K]
+}
 
 const DEFAULT_CONFIG: DCPConfig = {
   enabled: true,
   mode: 'safe',
   debug: false,
   turnProtection: { enabled: true, turns: 8 },
+  stepProtection: { enabled: true, steps: 2 },
   thresholds: {
     nudge: 0.7,
     autoPrune: 0.8,
@@ -34,30 +43,143 @@ const DEFAULT_CONFIG: DCPConfig = {
   },
 }
 
-export function loadConfig(cwd: string): DCPConfig {
-  let config = { ...DEFAULT_CONFIG }
+export function getDefaultConfig(): DCPConfig {
+  return structuredClone(DEFAULT_CONFIG)
+}
 
-  const globalPath = join(homedir(), '.pi', 'agent', 'dcp.json')
-  if (existsSync(globalPath)) {
-    try {
-      const globalConfig = JSON.parse(readFileSync(globalPath, 'utf-8'))
-      config = mergeDeep(config, globalConfig)
-    } catch (e) {
-      console.error('[DCP] Failed to load global config:', e)
-    }
-  }
+export function mergeConfig(
+  ...overrides: Array<DeepPartial<DCPConfig> | undefined>
+): DCPConfig {
+  const config = getDefaultConfig()
 
-  const localPath = join(cwd, '.pi', 'dcp.json')
-  if (existsSync(localPath)) {
-    try {
-      const localConfig = JSON.parse(readFileSync(localPath, 'utf-8'))
-      config = mergeDeep(config, localConfig)
-    } catch (e) {
-      console.error('[DCP] Failed to load local config:', e)
+  for (const override of overrides) {
+    if (override) {
+      mergeDeep(config, override)
     }
   }
 
   return config
+}
+
+export function getConfigSearchPaths(
+  cwd: string,
+  homeDir = homedir()
+): string[] {
+  const globalDir = join(homeDir, '.pi', 'agent')
+  const localDir = join(cwd, '.pi')
+
+  return [
+    join(globalDir, 'dcp.json'),
+    join(globalDir, 'dcp.jsonc'),
+    join(localDir, 'dcp.json'),
+    join(localDir, 'dcp.jsonc'),
+  ]
+}
+
+export function parseConfigText(text: string): DeepPartial<DCPConfig> {
+  const withoutBom = text.replace(/^\uFEFF/, '')
+  const withoutComments = stripJsonComments(withoutBom)
+  const withoutTrailingCommas = withoutComments.replace(/,\s*([}\]])/g, '$1')
+  return JSON.parse(withoutTrailingCommas)
+}
+
+export function loadConfig(cwd: string, homeDir = homedir()): DCPConfig {
+  const overrides: Array<DeepPartial<DCPConfig>> = []
+
+  for (const path of getConfigSearchPaths(cwd, homeDir)) {
+    const override = readConfigOverride(path)
+    if (override) {
+      overrides.push(override)
+    }
+  }
+
+  return mergeConfig(...overrides)
+}
+
+function readConfigOverride(path: string): DeepPartial<DCPConfig> | undefined {
+  if (!existsSync(path)) {
+    return undefined
+  }
+
+  try {
+    return parseConfigText(readFileSync(path, 'utf-8'))
+  } catch (error) {
+    console.error(`[DCP] Failed to load config from ${path}:`, error)
+    return undefined
+  }
+}
+
+function stripJsonComments(input: string): string {
+  let output = ''
+  let inString = false
+  let stringDelimiter = '"'
+  let escaping = false
+  let inLineComment = false
+  let inBlockComment = false
+
+  for (let index = 0; index < input.length; index++) {
+    const char = input[index]
+    const next = input[index + 1]
+
+    if (inLineComment) {
+      if (char === '\n') {
+        inLineComment = false
+        output += char
+      }
+      continue
+    }
+
+    if (inBlockComment) {
+      if (char === '*' && next === '/') {
+        inBlockComment = false
+        index++
+      }
+      continue
+    }
+
+    if (inString) {
+      output += char
+
+      if (escaping) {
+        escaping = false
+        continue
+      }
+
+      if (char === '\\') {
+        escaping = true
+        continue
+      }
+
+      if (char === stringDelimiter) {
+        inString = false
+      }
+
+      continue
+    }
+
+    if ((char === '"' || char === "'") && !inString) {
+      inString = true
+      stringDelimiter = char
+      output += char
+      continue
+    }
+
+    if (char === '/' && next === '/') {
+      inLineComment = true
+      index++
+      continue
+    }
+
+    if (char === '/' && next === '*') {
+      inBlockComment = true
+      index++
+      continue
+    }
+
+    output += char
+  }
+
+  return output
 }
 
 function mergeDeep(target: any, source: any): any {

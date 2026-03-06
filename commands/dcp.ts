@@ -1,5 +1,6 @@
 import type { ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import type { DCPConfig, DCPSessionState } from '../types'
+import { buildDetailsMarkdown, buildStatusMessage } from '../observability'
 
 export function handleDcpCommand(
   args: string,
@@ -18,13 +19,7 @@ export function handleDcpCommand(
         return
       }
 
-      let message = `**DCP Status**: Enabled (${config.mode} mode)\n`
-      message += `- Tokens Saved: ~${state.stats.tokensSavedEstimate}\n`
-      message += `- Items Pruned: ${JSON.stringify(state.stats.prunedItemsCount, null, 2)}\n`
-      message += `- Protected Skips: ${state.stats.protectedSkipCount}\n`
-      message += `- Turn Protection: ${config.turnProtection.enabled ? config.turnProtection.turns + ' turns' : 'disabled'}\n`
-
-      ctx.ui.notify(message, 'info')
+      ctx.ui.notify(buildStatusMessage(config, state), 'info')
       break
 
     case 'detail':
@@ -33,33 +28,8 @@ export function handleDcpCommand(
         ctx.ui.notify('DCP is currently disabled.', 'warning')
         return
       }
-      if (state.details.length === 0) {
-        ctx.ui.notify('No items have been pruned yet.', 'info')
-        return
-      }
 
-      let detailMd = `# DCP Pruned Items (~${state.stats.tokensSavedEstimate} tokens saved)\n\n`
-
-      const grouped = state.details.reduce(
-        (acc, item) => {
-          if (!acc[item.strategy]) acc[item.strategy] = []
-          acc[item.strategy].push(item)
-          return acc
-        },
-        {} as Record<string, typeof state.details>
-      )
-
-      for (const [strategy, items] of Object.entries(grouped)) {
-        detailMd += `## ${strategy} (${items.length})\n`
-        for (const item of items) {
-          const turnStr =
-            item.turnAge >= 0 ? `Turn ${item.turnAge}` : 'Assistant Action'
-          detailMd += `- **${item.toolName}** [${turnStr}] (~${item.tokensSaved} tokens): \`${item.argsSummary}\`\n`
-        }
-        detailMd += '\n'
-      }
-
-      ctx.ui.editor('DCP Details', detailMd)
+      ctx.ui.editor('DCP Details', buildDetailsMarkdown(config, state))
       break
 
     case 'manual':
@@ -76,7 +46,10 @@ export function handleDcpCommand(
       break
 
     default:
-      ctx.ui.notify('Usage: /dcp <status|stats|manual on|off>', 'error')
+      ctx.ui.notify(
+        'Usage: /dcp <status|stats|detail|details|manual on|off>',
+        'error'
+      )
       break
   }
 }

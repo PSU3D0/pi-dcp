@@ -1,25 +1,29 @@
 import type { AgentMessage } from '@mariozechner/pi-agent-core'
-import type { DCPConfig, DCPSessionState } from '../types'
-import { estimateTokens } from '../utils'
+import type { DCPConfig, DCPSessionState, DCPProtectionPolicy } from '../types'
+import { recordStrategyPruned, recordStrategySkip } from '../observability'
 
 export function applySupersedeWrites(
   messages: AgentMessage[],
   config: DCPConfig,
   state: DCPSessionState,
-  toolArgsIndex: Map<string, any>
+  toolArgsIndex: Map<string, any>,
+  protectionPolicy: DCPProtectionPolicy
 ): void {
   if (!config.strategies.supersedeWrites.enabled) return
 
   const readFiles = new Set<string>()
 
   // Iterate backwards. If we see a 'read', record the path.
-  // If we see a 'write' (or 'edit') for that path OLDER than the read, we can prune the massive write argument!
+  // If we see a 'write' (or 'edit') for that path OLDER than the read, we can prune the massive write argument.
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
 
     if (msg.role === 'toolResult') {
       const args = toolArgsIndex.get(msg.toolCallId)
-      if (!args) continue
+      if (!args) {
+        recordStrategySkip(state, 'supersedeWrites', 'other')
+        continue
+      }
 
       if (msg.toolName === 'read' && args.path) {
         readFiles.add(args.path)
@@ -30,43 +34,71 @@ export function applySupersedeWrites(
           block.type === 'toolCall' &&
           (block.name === 'write' || block.name === 'edit')
         ) {
+          const protection = protectionPolicy.get(i, {
+            toolName: block.name,
+            toolCallId: block.id,
+            toolArgs: block.arguments,
+          })
           const path = block.arguments.path || block.arguments.file
-          if (path && readFiles.has(path)) {
-            // This write/edit was superseded by a later read.
-            // We can replace the huge content/text arguments with a placeholder.
-            let saved = 0
-            if (typeof block.arguments.content === 'string') {
-              saved += Math.floor(block.arguments.content.length / 4)
-              block.arguments.content =
-                '[DCP: Content superseded by later read]'
-            }
-            if (typeof block.arguments.text === 'string') {
-              saved += Math.floor(block.arguments.text.length / 4)
-              block.arguments.text = '[DCP: Content superseded by later read]'
-            }
-            if (typeof block.arguments.oldText === 'string') {
-              saved += Math.floor(block.arguments.oldText.length / 4)
-              block.arguments.oldText =
-                '[DCP: Content superseded by later read]'
-            }
-            if (typeof block.arguments.newText === 'string') {
-              saved += Math.floor(block.arguments.newText.length / 4)
-              block.arguments.newText =
-                '[DCP: Content superseded by later read]'
-            }
 
-            if (saved > 0) {
-              state.stats.tokensSavedEstimate += saved
-              state.stats.prunedItemsCount.supersedeWrites++
+          if (
+            protection.viaToolProtection ||
+            protection.viaFileProtection ||
+            protection.viaFrontierPin
+          ) {
+            recordStrategySkip(
+              state,
+              'supersedeWrites',
+              'protected',
+              `toolCall:${block.id}`
+            )
+            continue
+          }
 
-              state.details.push({
-                strategy: 'supersedeWrites',
-                toolName: block.name,
-                turnAge: -1, // We don't track turn age perfectly for assistant blocks here, just rough estimate
-                tokensSaved: saved,
-                argsSummary: `Path: ${path}`,
-              })
-            }
+          if (protection.protected) {
+            recordStrategySkip(state, 'supersedeWrites', 'recent')
+            continue
+          }
+
+          if (!path || !readFiles.has(path)) {
+            recordStrategySkip(state, 'supersedeWrites', 'other')
+            continue
+          }
+
+          // This write/edit was superseded by a later read.
+          // We can replace the huge content/text arguments with a placeholder.
+          let saved = 0
+          if (typeof block.arguments.content === 'string') {
+            saved += Math.floor(block.arguments.content.length / 4)
+            block.arguments.content = '[DCP: Content superseded by later read]'
+          }
+          if (typeof block.arguments.text === 'string') {
+            saved += Math.floor(block.arguments.text.length / 4)
+            block.arguments.text = '[DCP: Content superseded by later read]'
+          }
+          if (typeof block.arguments.oldText === 'string') {
+            saved += Math.floor(block.arguments.oldText.length / 4)
+            block.arguments.oldText = '[DCP: Content superseded by later read]'
+          }
+          if (typeof block.arguments.newText === 'string') {
+            saved += Math.floor(block.arguments.newText.length / 4)
+            block.arguments.newText = '[DCP: Content superseded by later read]'
+          }
+
+          if (saved > 0) {
+            state.stats.tokensSavedEstimate += saved
+            state.stats.prunedItemsCount.supersedeWrites++
+            recordStrategyPruned(state, 'supersedeWrites')
+
+            state.details.push({
+              strategy: 'supersedeWrites',
+              toolName: block.name,
+              turnAge: -1, // We don't track turn age perfectly for assistant blocks here, just rough estimate
+              tokensSaved: saved,
+              argsSummary: `Path: ${path}`,
+            })
+          } else {
+            recordStrategySkip(state, 'supersedeWrites', 'other')
           }
         }
       }

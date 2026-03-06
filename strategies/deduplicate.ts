@@ -1,13 +1,14 @@
 import type { AgentMessage } from '@mariozechner/pi-agent-core'
-import type { DCPConfig, DCPSessionState } from '../types'
+import type { DCPConfig, DCPSessionState, DCPProtectionPolicy } from '../types'
 import { getToolSignature, estimateTokens } from '../utils'
+import { recordStrategyPruned, recordStrategySkip } from '../observability'
 
 export function applyDeduplicate(
   messages: AgentMessage[],
   config: DCPConfig,
   state: DCPSessionState,
   toolArgsIndex: Map<string, any>,
-  turnAges: number[]
+  protectionPolicy: DCPProtectionPolicy
 ): void {
   if (!config.strategies.deduplicate.enabled) return
 
@@ -16,25 +17,37 @@ export function applyDeduplicate(
   // Iterate backwards (from newest to oldest) to keep the LATEST exact duplicate
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    const turnAge = turnAges[i]
 
     if (msg.role === 'toolResult') {
       const args = toolArgsIndex.get(msg.toolCallId)
-      if (!args) continue // Safe fallback if args missing
+      if (!args) {
+        recordStrategySkip(state, 'deduplicate', 'other')
+        continue
+      }
 
+      const protection = protectionPolicy.get(i)
+      const turnAge = protection.turnAge
       const sig = getToolSignature(msg.toolName, args, msg.toolCallId)
 
       // We still register protected tools / recent tools into seenSignatures
       // so we can prune OLDER unprotected duplicates of them.
+      if (
+        protection.viaToolProtection ||
+        protection.viaFileProtection ||
+        protection.viaFrontierPin
+      ) {
+        recordStrategySkip(
+          state,
+          'deduplicate',
+          'protected',
+          `toolResult:${msg.toolCallId}`
+        )
+        seenSignatures.add(sig)
+        continue
+      }
 
-      const isProtected = config.protectedTools.includes(msg.toolName)
-      const isRecent =
-        config.turnProtection.enabled && turnAge < config.turnProtection.turns
-
-      if (isProtected || isRecent) {
-        if (isProtected) {
-          state.stats.protectedSkipCount++
-        }
+      if (protection.protected) {
+        recordStrategySkip(state, 'deduplicate', 'recent')
         seenSignatures.add(sig)
         continue
       }
@@ -44,6 +57,7 @@ export function applyDeduplicate(
         const tokensSaved = estimateTokens(msg.content)
         state.stats.tokensSavedEstimate += tokensSaved
         state.stats.prunedItemsCount.deduplicate++
+        recordStrategyPruned(state, 'deduplicate')
 
         state.details.push({
           strategy: 'deduplicate',
@@ -59,8 +73,6 @@ export function applyDeduplicate(
             text: `[DCP: Exact duplicate of a later tool call. Pruned to save tokens.]`,
           },
         ]
-
-        // Keep details intact so other extensions / session logic don't break
       } else {
         seenSignatures.add(sig)
       }

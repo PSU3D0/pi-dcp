@@ -3,7 +3,8 @@ import { applyOutputBodyReplace } from '../strategies/output-replace'
 import type { AgentMessage } from '@mariozechner/pi-agent-core'
 import type { DCPConfig } from '../types'
 import { createSessionState } from '../state'
-import { buildToolCallIndex, computeTurnAges } from '../utils'
+import { buildToolCallIndex } from '../utils'
+import { createProtectionPolicy } from '../protection'
 
 function mockConfig(): DCPConfig {
   return {
@@ -11,6 +12,7 @@ function mockConfig(): DCPConfig {
     mode: 'safe',
     debug: false,
     turnProtection: { enabled: true, turns: 2 },
+    stepProtection: { enabled: true, steps: 2 },
     thresholds: { nudge: 0.7, autoPrune: 0.8, forceCompact: 0.9 },
     protectedTools: ['todo'],
     protectedFilePatterns: [],
@@ -64,14 +66,20 @@ test('applyOutputBodyReplace prunes large outputs outside turn protection', () =
   const config = mockConfig()
   const state = createSessionState()
   const index = buildToolCallIndex(messages)
-  const ages = computeTurnAges(messages)
+  const policy = createProtectionPolicy(messages, config)
 
-  applyOutputBodyReplace(messages, config, state, index, ages)
+  applyOutputBodyReplace(messages, config, state, index, policy)
 
   expect((messages[2] as any).content[0].text).toContain(
     '[DCP: Large output from read({"path":"a.txt"}...) pruned due to age (Turn 2)'
   )
   expect(state.stats.prunedItemsCount.outputBodyReplace).toBe(1)
+  expect(state.details).toEqual([
+    expect.objectContaining({
+      strategy: 'outputBodyReplace',
+      toolName: 'read',
+    }),
+  ])
 })
 
 test('applyOutputBodyReplace keeps small outputs', () => {
@@ -110,9 +118,9 @@ test('applyOutputBodyReplace keeps small outputs', () => {
   const config = mockConfig()
   const state = createSessionState()
   const index = buildToolCallIndex(messages)
-  const ages = computeTurnAges(messages)
+  const policy = createProtectionPolicy(messages, config)
 
-  applyOutputBodyReplace(messages, config, state, index, ages)
+  applyOutputBodyReplace(messages, config, state, index, policy)
 
   expect((messages[2] as any).content[0].text).toBe('small')
   expect(state.stats.prunedItemsCount.outputBodyReplace).toBe(0)
@@ -151,9 +159,9 @@ test('applyOutputBodyReplace keeps recent large outputs', () => {
   const config = mockConfig()
   const state = createSessionState()
   const index = buildToolCallIndex(messages)
-  const ages = computeTurnAges(messages)
+  const policy = createProtectionPolicy(messages, config)
 
-  applyOutputBodyReplace(messages, config, state, index, ages)
+  applyOutputBodyReplace(messages, config, state, index, policy)
 
   expect((messages[2] as any).content[0].text).toBe(
     'This is a massive file content!'

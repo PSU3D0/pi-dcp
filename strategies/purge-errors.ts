@@ -1,12 +1,13 @@
 import type { AgentMessage } from '@mariozechner/pi-agent-core'
-import type { DCPConfig, DCPSessionState } from '../types'
+import type { DCPConfig, DCPSessionState, DCPProtectionPolicy } from '../types'
 import { estimateTokens } from '../utils'
+import { recordStrategyPruned, recordStrategySkip } from '../observability'
 
 export function applyPurgeErrors(
   messages: AgentMessage[],
   config: DCPConfig,
   state: DCPSessionState,
-  turnAges: number[]
+  protectionPolicy: DCPProtectionPolicy
 ): void {
   if (!config.strategies.purgeErrors.enabled) return
 
@@ -14,12 +15,32 @@ export function applyPurgeErrors(
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
-    const turnAge = turnAges[i]
 
     if (msg.role === 'toolResult' && msg.isError) {
-      if (turnAge < minTurnAge) continue
-      if (config.protectedTools.includes(msg.toolName)) {
-        state.stats.protectedSkipCount++
+      const protection = protectionPolicy.get(i)
+      const turnAge = protection.turnAge
+
+      if (
+        protection.viaToolProtection ||
+        protection.viaFileProtection ||
+        protection.viaFrontierPin
+      ) {
+        recordStrategySkip(
+          state,
+          'purgeErrors',
+          'protected',
+          `toolResult:${msg.toolCallId}`
+        )
+        continue
+      }
+
+      if (protection.protected) {
+        recordStrategySkip(state, 'purgeErrors', 'recent')
+        continue
+      }
+
+      if (turnAge < minTurnAge) {
+        recordStrategySkip(state, 'purgeErrors', 'recent')
         continue
       }
 
@@ -29,12 +50,14 @@ export function applyPurgeErrors(
         msg.content[0].type === 'text' &&
         msg.content[0].text.startsWith('[DCP:')
       ) {
+        recordStrategySkip(state, 'purgeErrors', 'other')
         continue
       }
 
       const tokensSaved = estimateTokens(msg.content)
       state.stats.tokensSavedEstimate += tokensSaved
       state.stats.prunedItemsCount.purgeErrors++
+      recordStrategyPruned(state, 'purgeErrors')
 
       // We preserve the first line or up to 200 chars to keep the error identity
       let summary = ''

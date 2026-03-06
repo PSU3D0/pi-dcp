@@ -1,0 +1,92 @@
+{
+  // Recommended human-edited DCP config.
+  //
+  // DCP now accepts both JSON and JSONC at:
+  //   - ~/.pi/agent/dcp.jsonc   (global)
+  //   - .pi/dcp.jsonc           (project-local)
+  //
+  // Search order is:
+  //   1. ~/.pi/agent/dcp.json
+  //   2. ~/.pi/agent/dcp.jsonc
+  //   3. .pi/dcp.json
+  //   4. .pi/dcp.jsonc
+  // Later files override earlier ones.
+
+  "enabled": true,
+
+  // `mode` is still mainly descriptive today.
+  // Use `safe` unless you are explicitly experimenting.
+  "mode": "safe",
+
+  // When true, show DCP status even if nothing was pruned.
+  "debug": false,
+
+  "turnProtection": {
+    // Protect recent prior user turns conservatively.
+    "enabled": true,
+    "turns": 8,
+  },
+
+  "stepProtection": {
+    // Protect the newest execution frontier inside a long autonomous turn.
+    // Short same-turn loops still stay on turn protection first.
+    "enabled": true,
+    "steps": 2,
+  },
+
+  "thresholds": {
+    // Pressure bands are based on context usage / context window.
+    // low      < nudge
+    // medium   >= nudge
+    // high     >= autoPrune
+    // critical >= forceCompact
+    "nudge": 0.7,
+    "autoPrune": 0.8,
+    "forceCompact": 0.9,
+  },
+
+  "protectedTools": [
+    // Coordination/state tools should stay visible.
+    "todo",
+    "subagent",
+    "send_to_session",
+    "plan_enter",
+    "plan_exit",
+  ],
+
+  "protectedFilePatterns": [
+    // Keep durable planning/progress artifacts visible.
+    "**/CHANGELOG.md",
+    "**/*.plan.md",
+    "**/progress.md",
+  ],
+
+  "strategies": {
+    "deduplicate": {
+      // Always safe: prune older exact duplicate tool results.
+      "enabled": true,
+    },
+    "purgeErrors": {
+      // Keep fresh errors intact; only shrink older ones.
+      "enabled": true,
+      "minTurnAge": 3,
+    },
+    "outputBodyReplace": {
+      // Replace large stale payloads once pressure/protection allow it.
+      "enabled": true,
+      "minChars": 1200,
+    },
+    "supersedeWrites": {
+      // Leave off by default; high-pressure-only and still the riskiest strategy.
+      "enabled": false,
+    },
+  },
+
+  "advanced": {
+    // Reserved for future experimental layers.
+    // These are currently dormant and should usually stay off.
+    "distillTool": { "enabled": false },
+    "compressTool": { "enabled": false },
+    "llmAutonomy": false,
+  },
+}

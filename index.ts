@@ -2,21 +2,25 @@ import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
 import type { AgentMessage } from '@mariozechner/pi-agent-core'
 import { buildSessionContext } from '@mariozechner/pi-coding-agent'
 import { loadConfig } from './config'
-import { createSessionState } from './state'
+import { createSessionState, resetSessionState } from './state'
 import { handleContextTransform } from './hooks/context-transform'
 import { handleDcpCommand } from './commands/dcp'
+import { refreshObservabilityState } from './observability'
 
 export default function (pi: ExtensionAPI) {
   // Load config globally for this extension runtime
   // (In a real setup we might re-load per session_start if project-local config changes)
   const cwd = process.cwd()
   const config = loadConfig(cwd)
-  const state = createSessionState()
+  const state = createSessionState(config)
 
   pi.on('session_start', async (_event, ctx) => {
     // Optionally update cwd logic if `ctx.cwd` differs from process.cwd()
     const sessionConfig = loadConfig(ctx.cwd)
     Object.assign(config, sessionConfig)
+
+    resetSessionState(state, config)
+    refreshObservabilityState(state, config, undefined, ctx.getContextUsage?.())
 
     // Perform a dry-run of the transform to populate stats and TUI footer immediately
     const entries = ctx.sessionManager.getEntries()

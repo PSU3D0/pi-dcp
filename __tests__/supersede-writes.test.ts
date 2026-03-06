@@ -3,6 +3,7 @@ import { applySupersedeWrites } from '../strategies/supersede-writes'
 import type { AgentMessage } from '@mariozechner/pi-agent-core'
 import type { DCPConfig } from '../types'
 import { createSessionState } from '../state'
+import { createProtectionPolicy } from '../protection'
 import { buildToolCallIndex } from '../utils'
 
 function mockConfig(): DCPConfig {
@@ -10,7 +11,8 @@ function mockConfig(): DCPConfig {
     enabled: true,
     mode: 'safe',
     debug: false,
-    turnProtection: { enabled: true, turns: 2 },
+    turnProtection: { enabled: false, turns: 0 },
+    stepProtection: { enabled: false, steps: 0 },
     thresholds: { nudge: 0.7, autoPrune: 0.8, forceCompact: 0.9 },
     protectedTools: [],
     protectedFilePatterns: [],
@@ -88,8 +90,9 @@ test('applySupersedeWrites prunes write arguments if superseded by later read', 
   const config = mockConfig()
   const state = createSessionState()
   const index = buildToolCallIndex(messages)
+  const policy = createProtectionPolicy(messages, config)
 
-  applySupersedeWrites(messages, config, state, index)
+  applySupersedeWrites(messages, config, state, index, policy)
 
   // The write should be pruned
   expect((messages[0] as any).content[0].arguments.content).toBe(
@@ -157,8 +160,9 @@ test('applySupersedeWrites does NOT prune writes if no later read exists', () =>
   const config = mockConfig()
   const state = createSessionState()
   const index = buildToolCallIndex(messages)
+  const policy = createProtectionPolicy(messages, config)
 
-  applySupersedeWrites(messages, config, state, index)
+  applySupersedeWrites(messages, config, state, index, policy)
 
   // The write should be kept intact
   expect((messages[0] as any).content[0].arguments.content).toBe('huge string')

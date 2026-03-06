@@ -4,67 +4,50 @@ An extension for the [Pi Coding Agent](https://github.com/badlogic/pi-mono) that
 
 ## Why DCP?
 
-As sessions grow, tool results (like huge file reads, massive bash stack traces, or repeated `ls` commands) push the LLM's context window to its limits. This increases latency, drives up API costs, and drastically increases the chance of "Lost in the Middle" syndrome, where the LLM forgets instructions hidden amidst thousands of lines of terminal output.
+As sessions grow, tool results (like huge file reads, massive bash stack traces, or repeated `ls` commands) push the LLM's context window to its limits. This increases latency, drives up API costs, and distracts the model from the current task.
 
-While Pi has native compaction, compaction operates blindly on all text before a certain cutoff point. **DCP operates semantically across the entire active branch**, safely discarding duplicate or obsolete data while preserving the semantic "breadcrumbs" of what the agent did.
+DCP solves this by functioning as a "Zero-Mutation Context Hook". It sits between Pi and the LLM, creating a clean, deep-copied subset of your message history just in time for the API request.
 
 ### Core Safety Invariants
+
 - **Never** deletes user messages or final assistant answers.
 - **Never** overwrites the actual Pi session JSONL file (perfectly survives `/undo` and `/tree` branch hopping).
-- **Never** deletes the causal history (e.g. knowing that a file *was* read, even if the payload is pruned).
+- **Never** deletes the causal history (e.g. knowing that a file _was_ read, even if the payload is pruned).
 - **Never** touches tool outputs from recent turns (default 8 turns protection).
 
 ## Installation
 
-```bash
-# Clone the repository
-git clone https://github.com/PSU3D0/pi-dcp.git
+### Install as a Pi package
 
-# Run Pi with the extension
-pi -e path/to/pi-dcp/index.ts
+```bash
+# Install from GitHub and let Pi discover the extension via package metadata
+pi install git:github.com/PSU3D0/pi-dcp
+
+# Or try it for just the current run
+pi -e git:github.com/PSU3D0/pi-dcp
 ```
 
-*Note: Once published, you can install via npm.*
+### Install from a local checkout
 
-## How it Extends a Session
-Imagine a deep debugging session:
-1. You run a massive test suite that fails with a 50-line stack trace.
-2. The agent reads 3 files (thousands of lines of code) to find the bug.
-3. The agent writes a fix, then reads the file again to verify.
-4. The agent re-runs the exact same test suite command.
+```bash
+git clone git@github.com:PSU3D0/pi-dcp.git
+cd pi-dcp
 
-Without DCP, the LLM context holds: 2 massive stack traces, 4 huge file reads, and a massive write payload. 
-**With DCP:**
-- The first 3 file reads are replaced with `[DCP: Large output pruned]` because their data is stale.
-- The `write` argument payload is pruned because it was superseded by the subsequent `read`.
-- The first stack trace is shrunk to 150 characters because it's no longer the active error.
-- The first `test` command output is pruned because it's an exact duplicate of the second.
+# Temporary test load
+pi -e ./index.ts
 
-DCP easily slices **30-50% of tokens** off long debugging sessions, letting you stay in the flow for hours without degrading model intelligence.
+# Or install the package from the local directory
+pi install .
+```
 
-## Pruning Strategies
+## Features & Strategies
 
-DCP operates through a series of pure-function strategies that execute backward over the session history in less than ~2 milliseconds.
+DCP operates through a series of pure-function strategies that execute backward over the session history in less than ~2 milliseconds:
 
-### 1. Exact Deduplicate (Enabled)
-If you run the exact same tool with the exact same arguments (e.g. `bash ls -la src/`) multiple times, DCP prunes the payload of all but the most recent one.
-- **Why it matters:** Agents frequently re-run commands to check their bearings. You only ever need the newest output of a repeated deterministic command.
-- **Default:** Protected if within the last 8 turns.
-
-### 2. Purge Errors (Enabled)
-When a bash script or compiler fails, the stack trace is crucial for the next 1-2 turns. But 10 turns later, once the bug is fixed, that 150-line trace is useless noise.
-- **Why it matters:** Stack traces are the #1 cause of sudden context spikes. DCP shrinks old stack traces to just the first 150 characters, preserving the causal memory of the error (*"Ah, I tried that and it threw a TypeError"*) without the bloat.
-- **Default:** Prunes errors older than 3 turns.
-
-### 3. Output Replace (Enabled)
-Ancient, massive payloads (like a 20,000 char file read) are swapped with a compact placeholder: `[DCP: Large output from read(...) pruned due to age (Turn 12). If you need this data again, re-run the tool.]`
-- **Why it matters:** If a read simply vanished, the LLM might hallucinate that it never saw the file. The placeholder acts as a perfect long-term memory pointer—the agent knows it looked at it, and knows how to fetch it again if it suddenly becomes relevant.
-- **Default:** Replaces outputs > 1200 chars older than 8 turns.
-
-### 4. Supersede Writes (Disabled by default)
-If the LLM uses `write` or `edit` to update a file, and subsequently uses `read` to check it, the massive `write` payload is redacted because the `read` inherently contains the new state.
-- **Why it matters:** Code generation arguments take up massive amounts of input tokens.
-- **Warning:** Disabled in the `safe` profile because Pi's `read` supports offset/limits. If the agent edits line 500, but only reads lines 1-100, pruning the write would cause the agent to forget the code it just wrote.
+1. **Exact Deduplicate**: If you run the exact same tool with the exact same arguments (e.g. `bash ls -la`) multiple times, DCP prunes the payload of all but the most recent one.
+2. **Purge Errors**: Colossal compilation stack traces are crucial for fixing bugs, but useless 10 turns later. DCP shrinks old stack traces to just the first 150 characters (preserving the causal memory of the error type).
+3. **Supersede Writes**: If the LLM uses `write` or `edit` to update a massive file, and subsequently uses `read` to check it, the massive `write` payload is redacted because the `read` inherently contains the new state.
+4. **Output Replace**: Ancient, massive payloads (like a 20,000 char file read) are swapped with a compact placeholder: `[DCP: Large output from read(...) pruned due to age. If you need this data again, re-run the tool.]`
 
 ## Commands
 
@@ -74,13 +57,39 @@ While in Pi, you can use the interactive `/dcp` command to see what is happening
 - `/dcp detail` - Opens a full-screen Markdown editor showing a categorized breakdown of exactly what was pruned and when.
 - `/dcp manual on|off` - Enable or disable DCP mid-session.
 
-*Note: DCP also places a non-intrusive status indicator (e.g., `✂️ DCP: ~17k tokens saved`) in the TUI footer whenever it successfully reduces your context payload.*
+_Note: DCP also places a non-intrusive status indicator (e.g., `✂️ DCP: ~17k tokens saved`) in the TUI footer whenever it successfully reduces your context payload._
 
 ## Configuration
 
-DCP is extremely conservative by default (`mode: "safe"`). You can override defaults globally at `~/.pi/agent/dcp.json` or locally per-project at `.pi/dcp.json`.
+DCP is conservative by default (`mode: "safe"`). It now supports both JSON and JSONC configs.
 
-```json
+Search order:
+
+- `~/.pi/agent/dcp.json`
+- `~/.pi/agent/dcp.jsonc`
+- `.pi/dcp.json`
+- `.pi/dcp.jsonc`
+
+Later files override earlier ones, so project-local JSONC wins last.
+
+Recommended:
+
+- use JSONC for human-edited configs
+- start from [`dcp.config.example.jsonc`](./dcp.config.example.jsonc)
+- keep `supersedeWrites` off until you have confidence in your workflow
+
+Current default behavior:
+
+- `turnProtection` keeps recent prior user turns stable
+- `stepProtection` keeps the current autonomous frontier stable once a same-turn run gets deep enough
+- pressure bands gate strategy aggression (`low`, `medium`, `high`, `critical`)
+- `protectedFilePatterns` are enforced
+- frontier pinning keeps the latest modified-file reads, latest verification outputs, and narrow plan/progress artifacts visible
+- extra names in `protectedTools` are harmless if your Pi setup does not define those tools; treat them as optional examples for coordination-heavy setups
+
+Minimal example:
+
+```jsonc
 {
   "enabled": true,
   "mode": "safe",
@@ -88,13 +97,37 @@ DCP is extremely conservative by default (`mode: "safe"`). You can override defa
     "enabled": true,
     "turns": 8
   },
-  "protectedTools": ["todo", "subagent", "send_to_session", "plan_enter", "plan_exit"],
-  "protectedFilePatterns": ["**/CHANGELOG.md", "**/*.plan.md", "**/progress.md"],
+  "stepProtection": {
+    "enabled": true,
+    "steps": 2
+  },
+  "thresholds": {
+    "nudge": 0.7,
+    "autoPrune": 0.8,
+    "forceCompact": 0.9
+  },
+  "protectedTools": [
+    "todo",
+    "subagent",
+    "send_to_session",
+    "plan_enter",
+    "plan_exit"
+  ],
+  "protectedFilePatterns": [
+    "**/CHANGELOG.md",
+    "**/*.plan.md",
+    "**/progress.md"
+  ],
   "strategies": {
     "deduplicate": { "enabled": true },
     "purgeErrors": { "enabled": true, "minTurnAge": 3 },
     "outputBodyReplace": { "enabled": true, "minChars": 1200 },
     "supersedeWrites": { "enabled": false }
+  },
+  "advanced": {
+    "distillTool": { "enabled": false },
+    "compressTool": { "enabled": false },
+    "llmAutonomy": false
   }
 }
 ```
